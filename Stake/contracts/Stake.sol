@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-// 0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48
-
-contract Stake is Ownable{
+contract Stake is Ownable, ReentrancyGuard {
     using SafeMath for uint;
 
-    ERC20 public usdc = ERC20(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48);
+    // BSC 链 USDC 地址
+    IERC20 public usdc = IERC20(0x8965349fb649A33a30cbFDa057D8eC2C48AbE2A2);
 
     struct Order {
         address user;
@@ -59,9 +59,9 @@ contract Stake is Ownable{
     //先将代币进行转移
     function depoist(uint _amount, address _invitation, bool _method) public returns(uint amountOfDevice) {
         usdc.transferFrom(msg.sender, address(this), _amount);
-        //先更新累计的收益总和
+        // 先更新累计的收益总和
         // update(_totalYeild, _totalDevice);
-        //判断是否有邀请人，然后创建订单
+        // 判断是否有邀请人，然后创建订单
         require(totalDevice != 0, "TotalDevice can't be zero");
         if(_invitation == address(0)) {
             if(_method) {
@@ -113,11 +113,11 @@ contract Stake is Ownable{
         }
     }
 
-    function getYeild() public {
+    function getYeild() public nonReentrant {
         countYield();       
         uint amount = yieldOfUser[msg.sender];
         //余额大于50则进行转账，小于等于50就进行收益统计不转帐并激发一个统计收益事件提醒
-        if(amount > 5**19) {
+        if(amount > 50 * 1e18) {
             uint amountUser = amount.mul(997).div(1000);
             yeildOfAdmin = yeildOfAdmin.add(amount.sub(amountUser));
             usdc.transfer(msg.sender,amountUser);
@@ -127,7 +127,7 @@ contract Stake is Ownable{
         }
     }
 
-    function withdraw() public {
+    function withdraw() public nonReentrant {
         uint amount;
         uint len = orderOfUser[msg.sender];
         for(uint i = 0; i < len; i++) {
@@ -141,11 +141,11 @@ contract Stake is Ownable{
                 yieldOfUser[msg.sender] = yieldOfUser[msg.sender].add(yield);
                 amount.add(order.amount);
                 //更新数组
-                removeOrder(index);
+                _removeOrder(index);
             } else if (block.timestamp > order.endTime && order.updateTime == order.endTime) {//如果到达质押时间，已经计算收益
                 //更新数组
                 amount.add(order.amount);
-                removeOrder(index);
+                _removeOrder(index);
             }
         }
         uint amountUser = amount.mul(997).div(1000);
@@ -170,7 +170,7 @@ contract Stake is Ownable{
         }
     }
 
-    function removeOrder(uint _indexInOrder) internal {       
+    function _removeOrder(uint _indexInOrder) private {       
         //将orders数组进行更新
         Order memory lastOrder = orders[orders.length.sub(1)];
         Order memory order = orders[_indexInOrder];
