@@ -3,7 +3,6 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
@@ -13,25 +12,34 @@ contract Stake is Ownable, ReentrancyGuard {
     // BSC 链 USDC 地址
     IERC20 public usdc = IERC20(0x8965349fb649A33a30cbFDa057D8eC2C48AbE2A2);
 
+    // struct Order {
+    //     address user;
+    //     uint amount;
+    //     uint updateTime;  //最近更新时间，如果已经计算过收益之后变为计算收益的时间
+    //     uint endTime;       
+    //     uint amountOfDevice;
+    //     uint yieldPerDay;
+    // }
+
     struct Order {
         address user;
         uint amount;
-        uint updateTime;  //最近更新时间，如果已经计算过收益之后变为计算收益的时间
-        uint endTime;       
-        uint amountOfDevice;
-        uint yieldPerDay;
+        uint updateTime;
+        uint endTime;
+        uint current_totalDevice;
+        uint current_totalYeild;
     }
 
     Order[] orders;
-    uint constant day_15 = 15 days;
-    uint constant day_30 = 30 days;
-    uint constant expend_15 = 6.0975e19;
-    uint constant expend_30 = 1.2195e20;
-    uint constant expendPerDevice = 4.065e18;
+
+    uint constant expend_15 = 6.0975e19;    // 121.95 USDC / 2
+    uint constant expend_30 = 1.2195e20;    // 121.95 USDC
+
     //总收益
     uint private totalYeild;
     //总矿机数
     uint private totalDevice;
+
     uint private yeildOfAdmin;
 
     //用户的收益
@@ -45,72 +53,52 @@ contract Stake is Ownable, ReentrancyGuard {
     //用户所拥有的订单的位置
     mapping(address => mapping(uint => uint)) indexOfUser;
 
-    event Depoist(address user, uint devices);
+    event Depoist(address user, uint amount, uint current_time, uint8 lockDuration);
     event GetReward(address user, uint amount);
     event Withdraw(address user, uint amount);
     event CountReward();
 
-    constructor(uint _totalYeild, uint _totalDevice) Ownable() {
+    constructor(uint _totalYeild, uint _totalDevice) {
         totalYeild = _totalYeild;
         totalDevice = _totalDevice;
     }
 
-    //_method为false时质押15天，true为质押30天
-    //先将代币进行转移
-    function depoist(uint _amount, address _invitation, bool _method) public returns(uint amountOfDevice) {
+    /**
+     * @dev 质押
+     * @param _amount 质押的 USDC 数量
+     * @param _invitation 上级邀请人
+     * @param _method 为 false 表示质押 15 天，true 表示质押 30 天
+     */
+    function depoist(uint _amount, address _invitation, bool _method) public returns() {
+        (uint current_totoalDevice, uint current_totalYeild) = _getTotalDeviceAndYield();
+        require(current_totoalDevice * current_totalYeild != 0, "Both TotalDevice and TotalYeild can't be zero");
+
         usdc.transferFrom(msg.sender, address(this), _amount);
-        // 先更新累计的收益总和
-        // update(_totalYeild, _totalDevice);
-        // 判断是否有邀请人，然后创建订单
-        require(totalDevice != 0, "TotalDevice can't be zero");
+
+        Order memory newOrder;
         if(_invitation == address(0)) {
             if(_method) {
-                amountOfDevice = _amount.div(expend_30);
-                Order memory order = Order(msg.sender, _amount, block.timestamp, block.timestamp.add(day_30), amountOfDevice, totalYeild.div(totalDevice).div(30));
-                orders.push(order);
-                balanceOf[msg.sender] = balanceOf[msg.sender].add(_amount);
-                uint amount = orderOfUser[msg.sender];
-                orderInUserList[orders.length.sub(1)] = amount;
-                orderOfUser[msg.sender] = amount.add(1);
-                indexOfUser[msg.sender][amount] = orders.length.sub(1);              
-                emit Depoist(msg.sender, amountOfDevice);
+                newOrder = Order(msg.sender, _amount, block.timestamp, block.timestamp + 30 days, current_totoalDevice, current_totalYeild);
             } else {
-                amountOfDevice = _amount.div(expend_15);
-                Order memory order = Order(msg.sender, _amount, totalYeild, block.timestamp.add(day_15), amountOfDevice, totalYeild.div(totalDevice).div(15));
-                orders.push(order);
-                balanceOf[msg.sender] = balanceOf[msg.sender].add(_amount);
-                uint amount = orderOfUser[msg.sender];
-                orderInUserList[orders.length.sub(1)] = amount;
-                orderOfUser[msg.sender] = amount.add(1);
-                indexOfUser[msg.sender][amount] = orders.length.sub(1);
-                emit Depoist(msg.sender, amountOfDevice);
+                newOrder = Order(msg.sender, _amount, block.timestamp, block.timestamp + 15 days, current_totoalDevice, current_totalYeild);
             }
-        } else {
-            uint yeild = _amount.div(100);
-            yieldOfUser[_invitation] = yieldOfUser[_invitation].add(yeild);
-            if(_method) {
-                //先计算邀请人获得的收益  
-                amountOfDevice = _amount.sub(yeild).div(expend_30);              
-                Order memory order = Order(msg.sender, _amount, totalYeild, block.timestamp.add(day_30), amountOfDevice, totalYeild.div(totalDevice).div(30));
-                orders.push(order);
-                balanceOf[msg.sender] = balanceOf[msg.sender].add(_amount);
-                uint amount = orderOfUser[msg.sender];
-                orderInUserList[orders.length.sub(1)] = amount;
-                orderOfUser[msg.sender] = amount.add(1);
-                indexOfUser[msg.sender][amount] = orders.length.sub(1);
-                emit Depoist(msg.sender, amountOfDevice);
+        } else { 
+            yieldOfUser[_invitation] += _amount / 100;;
+            if(_method) {    
+                newOrder = Order(msg.sender, _amount, totalYeild, block.timestamp.add(day_30), amountOfDevice, totalYeild.div(totalDevice).div(30));
             } else {
-                amountOfDevice = _amount.sub(yeild).div(expend_15); 
-                Order memory order = Order(msg.sender, _amount, totalYeild, block.timestamp.add(day_15), amountOfDevice, totalYeild.div(totalDevice).div(15));
-                orders.push(order);
-                balanceOf[msg.sender] = balanceOf[msg.sender].add(_amount);
-                uint amount = orderOfUser[msg.sender];
-                orderInUserList[orders.length.sub(1)] = amount;
-                orderOfUser[msg.sender] = amount.add(1);
-                indexOfUser[msg.sender][amount] = orders.length.sub(1);
-                emit Depoist(msg.sender, amountOfDevice);
+                newOrder = Order(msg.sender, _amount, totalYeild, block.timestamp.add(day_15), amountOfDevice, totalYeild.div(totalDevice).div(15));
             }
         }
+        orders.push(newOrder);
+        balanceOf[msg.sender] += _amount;
+        uint orderAmounts = orderOfUser[msg.sender];
+        orderInUserList[orders.length - 1] = orderAmounts;
+        orderOfUser[msg.sender] = orderAmounts + 1;
+        indexOfUser[msg.sender][orderAmounts] = orders.length - 1;
+
+        uint8 lockDuration = _method == true ? 30 : 15;
+        emit Depoist(msg.sender, _amount, block.timestamp, lockDuration);
     }
 
     function getYeild() public nonReentrant {
@@ -200,6 +188,11 @@ contract Stake is Ownable, ReentrancyGuard {
     function setTotalDevice(uint _amount) public onlyOwner() returns(bool) {
         totalDevice = _amount;
         return true;
+    }
+
+    function _getTotalDeviceAndYield() private returns (uint _totalDevice, uint _totalYield) {
+        _totalDevice = totalDevice;
+        _totalYeild = totalYeild;
     }
 
     function withdrawByAdmin(address _to) public onlyOwner() {
