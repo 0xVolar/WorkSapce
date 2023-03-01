@@ -28,6 +28,7 @@ contract Stake is Ownable, ReentrancyGuard {
         uint endTime;
         uint current_totalDevice;
         uint current_totalYeild;
+        uint8 lockDuration;
     }
 
     Order[] orders;
@@ -70,26 +71,19 @@ contract Stake is Ownable, ReentrancyGuard {
      * @param _method 为 false 表示质押 15 天，true 表示质押 30 天
      */
     function depoist(uint _amount, address _invitation, bool _method) public returns() {
-        (uint current_totoalDevice, uint current_totalYeild) = _getTotalDeviceAndYield();
+        (uint current_totoalDevice, uint current_totalYeild) = _getTotalDeviceAndYield();   // gas saving
         require(current_totoalDevice * current_totalYeild != 0, "Both TotalDevice and TotalYeild can't be zero");
 
         usdc.transferFrom(msg.sender, address(this), _amount);
 
-        Order memory newOrder;
-        if(_invitation == address(0)) {
-            if(_method) {
-                newOrder = Order(msg.sender, _amount, block.timestamp, block.timestamp + 30 days, current_totoalDevice, current_totalYeild);
-            } else {
-                newOrder = Order(msg.sender, _amount, block.timestamp, block.timestamp + 15 days, current_totoalDevice, current_totalYeild);
-            }
-        } else { 
-            yieldOfUser[_invitation] += _amount / 100;;
-            if(_method) {    
-                newOrder = Order(msg.sender, _amount, totalYeild, block.timestamp.add(day_30), amountOfDevice, totalYeild.div(totalDevice).div(30));
-            } else {
-                newOrder = Order(msg.sender, _amount, totalYeild, block.timestamp.add(day_15), amountOfDevice, totalYeild.div(totalDevice).div(15));
-            }
+        if(_invitation != address(0)) {
+            yieldOfUser[_invitation] += _amount / 100;
         }
+
+        uint lockTime = _method == true ? 30 days : 15 days;
+        uint8 lockDuration = _method == true ? 30 : 15;
+        Order memory newOrder = Order(msg.sender, _amount, totalYeild, block.timestamp + lockTime, current_totoalDevice, current_totalYeild, lockDuration);
+
         orders.push(newOrder);
         balanceOf[msg.sender] += _amount;
         uint orderAmounts = orderOfUser[msg.sender];
@@ -97,22 +91,19 @@ contract Stake is Ownable, ReentrancyGuard {
         orderOfUser[msg.sender] = orderAmounts + 1;
         indexOfUser[msg.sender][orderAmounts] = orders.length - 1;
 
-        uint8 lockDuration = _method == true ? 30 : 15;
         emit Depoist(msg.sender, _amount, block.timestamp, lockDuration);
     }
 
+    // 提取收益
     function getYeild() public nonReentrant {
-        countYield();       
+        _countYield();       
         uint amount = yieldOfUser[msg.sender];
-        //余额大于50则进行转账，小于等于50就进行收益统计不转帐并激发一个统计收益事件提醒
-        if(amount > 50 * 1e18) {
-            uint amountUser = amount.mul(97).div(100);      // 3% 手续费
-            yeildOfAdmin = yeildOfAdmin.add(amount.sub(amountUser));
-            usdc.transfer(msg.sender,amountUser);
-            emit GetReward(msg.sender, amountUser);
-        } else {
-            emit CountReward();
-        }
+
+        require(amount > 5e19, 'Should exceed 50 USDC');
+        uint amountUser = amount * 97 / 100;      // 3% 手续费
+        yeildOfAdmin += amount - amountUser;
+        usdc.transfer(msg.sender, amountUser);
+        emit GetReward(msg.sender, amountUser);
     }
 
     function withdraw() public nonReentrant {
@@ -143,7 +134,7 @@ contract Stake is Ownable, ReentrancyGuard {
     }
 
     //计算收益
-    function countYield() internal {
+    function _countYield() private {
         for(uint i = 0; i < orderOfUser[msg.sender]; i++) {
             uint index = indexOfUser[msg.sender][i];
             Order storage order = orders[index];
@@ -156,6 +147,23 @@ contract Stake is Ownable, ReentrancyGuard {
             order.updateTime = time;
             yieldOfUser[msg.sender] = yieldOfUser[msg.sender].add(yield);
         }
+    }
+
+    // 用户查看计算收益
+    function calReward() view public returns (uint) {
+        uint reward;
+        for(uint i = 0; i < orderOfUser[msg.sender]; i++) {
+            uint index = indexOfUser[msg.sender][i];
+            Order storage order = orders[index];
+            //判断是否已经计算了收益
+            if(order.updateTime == order.endTime) {
+                continue;
+            }
+            uint time = Math.min(order.endTime, block.timestamp);
+            uint yield = time.sub(order.updateTime).div(1 days).mul(order.yieldPerDay).div(2);
+            reward += yield;
+        }
+        return reward;
     }
 
     function _removeOrder(uint _indexInOrder) private {       
