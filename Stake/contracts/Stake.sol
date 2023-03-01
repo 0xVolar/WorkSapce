@@ -164,6 +164,9 @@ contract Stake is Ownable, ReentrancyGuard {
             uint index = indexOfUser[msg.sender][i];
             Order memory order = orders[index];
             //判断是否已经计算了收益
+            if(order.lockDuration != lockTime) {
+                continue;
+            }
             if(order.updateTime == order.endTime) {
                 continue;
             }
