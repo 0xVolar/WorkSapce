@@ -118,7 +118,7 @@ contract Stake is Ownable, ReentrancyGuard {
         uint amount = yieldOfUser[msg.sender];
         //余额大于50则进行转账，小于等于50就进行收益统计不转帐并激发一个统计收益事件提醒
         if(amount > 50 * 1e18) {
-            uint amountUser = amount.mul(997).div(1000);
+            uint amountUser = amount.mul(97).div(100);      // 3% 手续费
             yeildOfAdmin = yeildOfAdmin.add(amount.sub(amountUser));
             usdc.transfer(msg.sender,amountUser);
             emit GetReward(msg.sender, amountUser);
@@ -148,7 +148,7 @@ contract Stake is Ownable, ReentrancyGuard {
                 _removeOrder(index);
             }
         }
-        uint amountUser = amount.mul(997).div(1000);
+        uint amountUser = amount.mul(97).div(100);      // 3% 手续费
         yeildOfAdmin = yeildOfAdmin.add(amount.sub(amountUser));
         usdc.transfer(msg.sender, amountUser);
         emit Withdraw(msg.sender, amountUser);
