@@ -28,7 +28,7 @@ contract Stake is Ownable, ReentrancyGuard {
         uint endTime;
         uint current_totalDevice;
         uint current_totalYeild;
-        uint8 lockDuration;
+        uint lockDuration;
     }
 
     Order[] orders;
@@ -54,7 +54,7 @@ contract Stake is Ownable, ReentrancyGuard {
     //用户所拥有的订单的位置
     mapping(address => mapping(uint => uint)) indexOfUser;
 
-    event Depoist(address user, uint amount, uint current_time, uint8 lockDuration);
+    event Depoist(address user, uint amount, uint current_time, uint lockDuration);
     event GetReward(address user, uint amount);
     event Withdraw(address user, uint amount);
     event CountReward();
@@ -80,9 +80,8 @@ contract Stake is Ownable, ReentrancyGuard {
             yieldOfUser[_invitation] += _amount / 100;
         }
 
-        uint lockTime = _method == true ? 30 days : 15 days;
         uint8 lockDuration = _method == true ? 30 : 15;
-        Order memory newOrder = Order(msg.sender, _amount, totalYeild, block.timestamp + lockTime, current_totoalDevice, current_totalYeild, lockDuration);
+        Order memory newOrder = Order(msg.sender, _amount, totalYeild, block.timestamp + lockDuration * 1 days, current_totoalDevice, current_totalYeild, lockDuration);
 
         orders.push(newOrder);
         balanceOf[msg.sender] += _amount;
